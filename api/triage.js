@@ -110,12 +110,25 @@ export default async function handler(req, res) {
         systemInstruction: SYSTEM_PROMPT,
         responseMimeType: 'application/json',
         responseSchema: TRIAGE_SCHEMA,
-        maxOutputTokens: 1000,
+        // Gemini 2.5 Flash thinks by default and thinking tokens count against
+        // maxOutputTokens — that truncates the JSON. Disable thinking for this
+        // structured-extraction task and leave headroom for the output.
+        thinkingConfig: { thinkingBudget: 0 },
+        maxOutputTokens: 2048,
       },
     });
 
     const raw = response.text;
-    return res.status(200).json(JSON.parse(raw));
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      console.error('Unparseable model output:', raw);
+      return res.status(502).json({
+        error: 'The AI returned a malformed response. Please try again.',
+      });
+    }
+    return res.status(200).json(data);
   } catch (err) {
     console.error('Triage failed:', err);
     if (isRetryable(err)) {
