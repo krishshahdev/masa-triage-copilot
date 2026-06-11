@@ -1,8 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 
-// Server-side only. Reads GEMINI_API_KEY from the environment — the key never
-// reaches the browser. This file runs as a Vercel serverless function (/api/triage).
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// Server-side only. The GEMINI_API_KEY is read from the environment and never
+// reaches the browser. This runs as a Vercel serverless function (/api/triage).
 
 // Override-able via env so a model rename doesn't require a code change.
 // Flash models are on Google's free tier.
@@ -62,10 +61,19 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed.' });
   }
 
+  if (!process.env.GEMINI_API_KEY) {
+    return res.status(500).json({
+      error:
+        'Server is missing GEMINI_API_KEY. Add it in Vercel → Settings → Environment Variables, then redeploy.',
+    });
+  }
+
   const { message } = req.body ?? {};
   if (!message || typeof message !== 'string') {
     return res.status(400).json({ error: 'A "message" string is required.' });
   }
+
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
   try {
     const response = await ai.models.generateContent({
