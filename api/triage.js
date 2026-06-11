@@ -4,8 +4,9 @@ import { GoogleGenAI } from '@google/genai';
 // reaches the browser. This runs as a Vercel serverless function (/api/triage).
 
 // Override-able via env so a model rename doesn't require a code change.
-// Flash models are on Google's free tier.
-const MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
+// Flash models are on Google's free tier. 2.5-flash is GA with stable free-tier
+// capacity; set GEMINI_MODEL=gemini-3.5-flash to use the newer model.
+const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
 const SYSTEM_PROMPT = `You are MASA's AI-powered member triage assistant. MASA (Medical Air Services Association) provides emergency medical transportation coverage to members in the US and Caribbean since 1974.
 
@@ -56,6 +57,32 @@ const TRIAGE_SCHEMA = {
   ],
 };
 
+// Google returns 503/UNAVAILABLE ("high demand") or 429 on transient overload —
+// these are worth a quick retry rather than failing the user's request outright.
+function isRetryable(err) {
+  const status = err?.status ?? err?.code;
+  if (status === 429 || status === 500 || status === 503) return true;
+  return /UNAVAILABLE|overloaded|high demand|"code":\s*(429|500|503)/i.test(
+    String(err?.message ?? ''),
+  );
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function generateWithRetry(ai, params, attempts = 3) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await ai.models.generateContent(params);
+    } catch (err) {
+      lastErr = err;
+      if (!isRetryable(err) || i === attempts - 1) throw err;
+      await sleep(500 * 2 ** i); // 500ms, then 1000ms
+    }
+  }
+  throw lastErr;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed.' });
@@ -76,7 +103,7 @@ export default async function handler(req, res) {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await generateWithRetry(ai, {
       model: MODEL,
       contents: message,
       config: {
@@ -91,7 +118,12 @@ export default async function handler(req, res) {
     return res.status(200).json(JSON.parse(raw));
   } catch (err) {
     console.error('Triage failed:', err);
-    const status = err?.status ?? 500;
+    if (isRetryable(err)) {
+      return res.status(503).json({
+        error: 'The AI service is busy right now. Please try again in a moment.',
+      });
+    }
+    const status = typeof err?.status === 'number' ? err.status : 500;
     return res.status(status).json({ error: err?.message || 'Triage request failed.' });
   }
 }
