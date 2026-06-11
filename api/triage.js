@@ -1,8 +1,12 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenAI } from '@google/genai';
 
-// Server-side only. Reads ANTHROPIC_API_KEY from the environment — the key never
+// Server-side only. Reads GEMINI_API_KEY from the environment — the key never
 // reaches the browser. This file runs as a Vercel serverless function (/api/triage).
-const client = new Anthropic();
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+// Override-able via env so a model rename doesn't require a code change.
+// Flash models are on Google's free tier.
+const MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
 
 const SYSTEM_PROMPT = `You are MASA's AI-powered member triage assistant. MASA (Medical Air Services Association) provides emergency medical transportation coverage to members in the US and Caribbean since 1974.
 
@@ -20,8 +24,8 @@ NOT covered:
 
 Assess the member's situation: urgency level, coverage eligibility, the rationale, a recommended next step for the claims team, a plain-language summary, and an empathetic draft response (3-4 sentences) to send to the member or their family.`;
 
-// Structured outputs guarantee the model returns JSON matching this exact shape,
-// so the response is always parseable — no prompt-level "respond only in JSON" needed.
+// Gemini structured output: responseMimeType forces JSON and responseSchema
+// constrains the shape, so the response is reliably parseable.
 const TRIAGE_SCHEMA = {
   type: 'object',
   properties: {
@@ -43,7 +47,14 @@ const TRIAGE_SCHEMA = {
     'member_summary',
     'draft_response',
   ],
-  additionalProperties: false,
+  propertyOrdering: [
+    'urgency',
+    'coverage',
+    'coverage_reason',
+    'recommended_action',
+    'member_summary',
+    'draft_response',
+  ],
 };
 
 export default async function handler(req, res) {
@@ -57,15 +68,18 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await client.messages.create({
-      model: 'claude-opus-4-8',
-      max_tokens: 1000,
-      system: SYSTEM_PROMPT,
-      output_config: { format: { type: 'json_schema', schema: TRIAGE_SCHEMA } },
-      messages: [{ role: 'user', content: message }],
+    const response = await ai.models.generateContent({
+      model: MODEL,
+      contents: message,
+      config: {
+        systemInstruction: SYSTEM_PROMPT,
+        responseMimeType: 'application/json',
+        responseSchema: TRIAGE_SCHEMA,
+        maxOutputTokens: 1000,
+      },
     });
 
-    const raw = response.content.map((b) => b.text || '').join('');
+    const raw = response.text;
     return res.status(200).json(JSON.parse(raw));
   } catch (err) {
     console.error('Triage failed:', err);
