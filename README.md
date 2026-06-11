@@ -35,14 +35,15 @@ The free tier covers low-traffic demo use. See [Gemini API pricing](https://ai.g
 
 ## Local development
 
-The chat needs the `/api/triage` backend, which plain `vite` does not serve. Use the Vercel CLI to run the frontend and the function together:
+The chat needs the `/api/triage` backend, which plain `vite` does not serve. Use the Vercel CLI via `npx` (no global install needed) to run the frontend and the function together:
 
 ```bash
-npm install -g vercel
-vercel dev
+npx vercel dev
 ```
 
-`npm run dev` still works for frontend-only UI work, but triage requests will 404 until you run `vercel dev`.
+The first run will prompt you to log in (`npx vercel login`) and link the project — accept the defaults.
+
+`npm run dev` still works for frontend-only UI work, but triage requests will 404 until you run `npx vercel dev`.
 
 ## Features
 
@@ -58,7 +59,7 @@ vercel dev
 Deploys to Vercel out of the box:
 
 ```bash
-vercel
+npx vercel
 ```
 
 Set `GEMINI_API_KEY` as an environment variable in your Vercel project settings (Project → Settings → Environment Variables). The `/api` directory is auto-detected as a serverless function. Optionally set `GEMINI_MODEL` to override the default model.
